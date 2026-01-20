@@ -154,9 +154,23 @@ func (m *baseMap) Contains(index ref.Val) ref.Val {
 
 // ConvertToNative implements the ref.Val interface method.
 func (m *baseMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	// Special handling for interface{}: recursively convert nested structures
+	// to their native equivalents to avoid exposing CEL internal types.
+	if typeDesc.Kind() == reflect.Interface && typeDesc.NumMethod() == 0 {
+		return m.ConvertToNative(reflect.TypeOf(map[string]any{}))
+	}
+	// For map[string]any or map[string]interface{}, skip the assignability check
+	// and use the iteration-based conversion to ensure nested values are recursively converted.
+	skipAssignabilityCheck := false
+	if typeDesc.Kind() == reflect.Map &&
+		typeDesc.Key() == reflect.TypeOf("") &&
+		typeDesc.Elem().Kind() == reflect.Interface &&
+		typeDesc.Elem().NumMethod() == 0 {
+		skipAssignabilityCheck = true
+	}
 	// If the map is already assignable to the desired type return it, e.g. interfaces and
 	// maps with the same key value types.
-	if reflect.TypeOf(m.value).AssignableTo(typeDesc) {
+	if !skipAssignabilityCheck && reflect.TypeOf(m.value).AssignableTo(typeDesc) {
 		return m.value, nil
 	}
 	if reflect.TypeOf(m).AssignableTo(typeDesc) {
@@ -205,7 +219,15 @@ func (m *baseMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			refElemValue, err := m.Get(key).ConvertToNative(otherElem)
+			elem := m.Get(key)
+			// When converting to interface{}, recursively convert nested maps and lists
+			// to their native equivalents to avoid exposing CEL internal types.
+			var refElemValue any
+			if otherElem.Kind() == reflect.Interface && otherElem.NumMethod() == 0 {
+				refElemValue, err = convertToNativeInterface(elem)
+			} else {
+				refElemValue, err = elem.ConvertToNative(otherElem)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -758,7 +780,13 @@ func (m *protoMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 			// early terminate the range loop.
 			return false
 		}
-		ntvVal, err = celVal.ConvertToNative(otherValType)
+		// When converting to interface{}, recursively convert nested maps and lists
+		// to their native equivalents to avoid exposing CEL internal types.
+		if otherValType.Kind() == reflect.Interface && otherValType.NumMethod() == 0 {
+			ntvVal, err = convertToNativeInterface(celVal)
+		} else {
+			ntvVal, err = celVal.ConvertToNative(otherValType)
+		}
 		if err != nil {
 			// early terminate the range loop.
 			return false
@@ -1064,4 +1092,22 @@ func isDelim(r rune) bool {
 
 func isLower(r rune) bool {
 	return r >= 'a' && r <= 'z'
+}
+
+// convertToNativeInterface converts a CEL value to a native Go type suitable for interface{}
+// by recursively converting nested maps and lists to their native equivalents.
+// This ensures that when converting to map[string]any or []any, nested structures
+// are properly converted instead of remaining as CEL internal types.
+func convertToNativeInterface(val ref.Val) (any, error) {
+	switch v := val.(type) {
+	case traits.Mapper:
+		// Convert nested maps to map[string]any
+		return v.ConvertToNative(reflect.TypeOf(map[string]any{}))
+	case traits.Lister:
+		// Convert nested lists to []any
+		return v.ConvertToNative(reflect.TypeOf([]any{}))
+	default:
+		// For other types (primitives), convert to interface{}
+		return val.ConvertToNative(reflect.TypeOf((*any)(nil)).Elem())
+	}
 }

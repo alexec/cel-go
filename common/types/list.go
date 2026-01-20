@@ -153,8 +153,21 @@ func (l *baseList) Contains(elem ref.Val) ref.Val {
 
 // ConvertToNative implements the ref.Val interface method.
 func (l *baseList) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	// Special handling for interface{}: recursively convert nested structures
+	// to their native equivalents to avoid exposing CEL internal types.
+	if typeDesc.Kind() == reflect.Interface && typeDesc.NumMethod() == 0 {
+		return l.ConvertToNative(reflect.TypeOf([]any{}))
+	}
+	// For []any or []interface{}, skip the assignability check
+	// and use the iteration-based conversion to ensure nested values are recursively converted.
+	skipAssignabilityCheck := false
+	if (typeDesc.Kind() == reflect.Slice || typeDesc.Kind() == reflect.Array) &&
+		typeDesc.Elem().Kind() == reflect.Interface &&
+		typeDesc.Elem().NumMethod() == 0 {
+		skipAssignabilityCheck = true
+	}
 	// If the underlying list value is assignable to the reflected type return it.
-	if reflect.TypeOf(l.value).AssignableTo(typeDesc) {
+	if !skipAssignabilityCheck && reflect.TypeOf(l.value).AssignableTo(typeDesc) {
 		return l.value, nil
 	}
 	// If the list wrapper is assignable to the desired type return it.
@@ -199,7 +212,15 @@ func (l *baseList) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	}
 	for i := 0; i < elemCount; i++ {
 		elem := l.NativeToValue(l.get(i))
-		nativeElemVal, err := elem.ConvertToNative(otherElemType)
+		// When converting to interface{}, recursively convert nested maps and lists
+		// to their native equivalents to avoid exposing CEL internal types.
+		var nativeElemVal any
+		var err error
+		if otherElemType.Kind() == reflect.Interface && otherElemType.NumMethod() == 0 {
+			nativeElemVal, err = convertToNativeInterface(elem)
+		} else {
+			nativeElemVal, err = elem.ConvertToNative(otherElemType)
+		}
 		if err != nil {
 			return nil, err
 		}
