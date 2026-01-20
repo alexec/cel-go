@@ -156,7 +156,7 @@ func (l *baseList) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	// Special handling for interface{}: recursively convert nested structures
 	// to their native equivalents to avoid exposing CEL internal types.
 	if typeDesc.Kind() == reflect.Interface && typeDesc.NumMethod() == 0 {
-		return l.ConvertToNative(reflect.TypeOf([]any{}))
+		return l.ConvertToNative(reflect.TypeFor[[]any]())
 	}
 	// For []any or []interface{}, skip the assignability check
 	// and use the iteration-based conversion to ensure nested values are recursively converted.

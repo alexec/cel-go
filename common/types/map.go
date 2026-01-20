@@ -157,7 +157,7 @@ func (m *baseMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	// Special handling for interface{}: recursively convert nested structures
 	// to their native equivalents to avoid exposing CEL internal types.
 	if typeDesc.Kind() == reflect.Interface && typeDesc.NumMethod() == 0 {
-		return m.ConvertToNative(reflect.TypeOf(map[string]any{}))
+		return m.ConvertToNative(reflect.TypeFor[map[string]any]())
 	}
 	// For map[string]any or map[string]interface{}, skip the assignability check
 	// and use the iteration-based conversion to ensure nested values are recursively converted.
@@ -1102,12 +1102,12 @@ func convertToNativeInterface(val ref.Val) (any, error) {
 	switch v := val.(type) {
 	case traits.Mapper:
 		// Convert nested maps to map[string]any
-		return v.ConvertToNative(reflect.TypeOf(map[string]any{}))
+		return v.ConvertToNative(reflect.TypeFor[map[string]any]())
 	case traits.Lister:
 		// Convert nested lists to []any
-		return v.ConvertToNative(reflect.TypeOf([]any{}))
+		return v.ConvertToNative(reflect.TypeFor[[]any]())
 	default:
 		// For other types (primitives), convert to interface{}
-		return val.ConvertToNative(reflect.TypeOf((*any)(nil)).Elem())
+		return val.ConvertToNative(reflect.TypeFor[any]())
 	}
 }
