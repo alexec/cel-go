@@ -17,6 +17,7 @@ package cel
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -3512,3 +3513,49 @@ func interpret(t testing.TB, env *Env, expr string, vars any) (ref.Val, error) {
 	}
 	return out, nil
 }
+
+// TestConvertToNativeNestedStructures tests issue #1259
+// When calling ConvertToNative(reflect.TypeFor[map[string]any]()) on a CEL evaluation result
+// containing nested structures, the nested values should be recursively converted to native Go types.
+func TestConvertToNativeNestedStructures(t *testing.T) {
+	env, err := NewEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ast, issues := env.Compile(`{
+		"role": "user",
+		"parts": [{"kind": "text", "text": "hello"}]
+	}`)
+	if issues != nil && issues.Err() != nil {
+		t.Fatal(issues.Err())
+	}
+
+	prg, err := env.Program(ast)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, _, err := prg.Eval(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	native, err := result.ConvertToNative(reflect.TypeFor[map[string]any]())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This should produce correct JSON
+	jsonBytes, err := json.Marshal(native)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	expectedJSON := `{"parts":[{"kind":"text","text":"hello"}],"role":"user"}`
+	actualJSON := string(jsonBytes)
+	if actualJSON != expectedJSON {
+		t.Errorf("JSON mismatch:\nGot:      %s\nExpected: %s", actualJSON, expectedJSON)
+	}
+}
+

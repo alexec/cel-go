@@ -1252,3 +1252,151 @@ func (m proxyLegacyMap) Iterator() traits.Iterator {
 func (m proxyLegacyMap) Size() ref.Val {
 	return m.proxy.Size()
 }
+
+// TestMapConvertToNative_NestedStructures tests that ConvertToNative
+// recursively converts nested maps and lists when the target type is map[string]any.
+// This addresses issue #1259.
+func TestMapConvertToNative_NestedStructures(t *testing.T) {
+	reg := newTestRegistry(t)
+	
+	// Create a map with nested structures
+	innerMap := reg.NativeToValue(map[string]any{
+		"kind": "text",
+		"text": "hello",
+	})
+	list := reg.NativeToValue([]ref.Val{innerMap})
+	outerMap := reg.NativeToValue(map[string]any{
+		"role":  "user",
+		"parts": list,
+	})
+	
+	// Convert to map[string]any
+	native, err := outerMap.ConvertToNative(reflect.TypeFor[map[string]any]())
+	if err != nil {
+		t.Fatalf("ConvertToNative failed: %v", err)
+	}
+	
+	// Verify that json.Marshal works correctly
+	jsonBytes, err := json.Marshal(native)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	
+	expectedJSON := `{"parts":[{"kind":"text","text":"hello"}],"role":"user"}`
+	actualJSON := string(jsonBytes)
+	if actualJSON != expectedJSON {
+		t.Errorf("JSON mismatch:\nGot:      %s\nExpected: %s", actualJSON, expectedJSON)
+	}
+	
+	// Verify the structure is properly typed
+	m, ok := native.(map[string]any)
+	if !ok {
+		t.Fatalf("Expected map[string]any, got %T", native)
+	}
+	
+	parts, ok := m["parts"].([]any)
+	if !ok {
+		t.Fatalf("Expected []any for 'parts', got %T", m["parts"])
+	}
+	
+	if len(parts) != 1 {
+		t.Fatalf("Expected 1 element in parts, got %d", len(parts))
+	}
+	
+	part, ok := parts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected map[string]any for parts[0], got %T", parts[0])
+	}
+	
+	if part["kind"] != "text" {
+		t.Errorf("Expected part['kind'] == 'text', got %v", part["kind"])
+	}
+	
+	if part["text"] != "hello" {
+		t.Errorf("Expected part['text'] == 'hello', got %v", part["text"])
+	}
+}
+
+// TestListConvertToNative_NestedStructures tests that ConvertToNative
+// recursively converts nested maps and lists when the target type is []any.
+func TestListConvertToNative_NestedStructures(t *testing.T) {
+	reg := newTestRegistry(t)
+	
+	// Create a list with nested maps
+	innerMap1 := reg.NativeToValue(map[string]any{"id": int64(1), "name": "first"})
+	innerMap2 := reg.NativeToValue(map[string]any{"id": int64(2), "name": "second"})
+	outerList := reg.NativeToValue([]ref.Val{innerMap1, innerMap2})
+	
+	// Convert to []any
+	native, err := outerList.ConvertToNative(reflect.TypeFor[[]any]())
+	if err != nil {
+		t.Fatalf("ConvertToNative failed: %v", err)
+	}
+	
+	// Verify that json.Marshal works correctly
+	jsonBytes, err := json.Marshal(native)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	
+	expectedJSON := `[{"id":1,"name":"first"},{"id":2,"name":"second"}]`
+	actualJSON := string(jsonBytes)
+	if actualJSON != expectedJSON {
+		t.Errorf("JSON mismatch:\nGot:      %s\nExpected: %s", actualJSON, expectedJSON)
+	}
+	
+	// Verify the structure is properly typed
+	list, ok := native.([]any)
+	if !ok {
+		t.Fatalf("Expected []any, got %T", native)
+	}
+	
+	if len(list) != 2 {
+		t.Fatalf("Expected 2 elements, got %d", len(list))
+	}
+	
+	item1, ok := list[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected map[string]any for list[0], got %T", list[0])
+	}
+	
+	if item1["id"] != int64(1) {
+		t.Errorf("Expected item1['id'] == 1, got %v", item1["id"])
+	}
+	
+	if item1["name"] != "first" {
+		t.Errorf("Expected item1['name'] == 'first', got %v", item1["name"])
+	}
+}
+
+// TestMapConvertToNative_DeeplyNested tests deeply nested structures
+func TestMapConvertToNative_DeeplyNested(t *testing.T) {
+	reg := newTestRegistry(t)
+	
+	// Create deeply nested structure: map -> list -> map -> list -> value
+	deepestList := reg.NativeToValue([]ref.Val{String("value1"), String("value2")})
+	innerMap := reg.NativeToValue(map[string]any{"items": deepestList})
+	middleList := reg.NativeToValue([]ref.Val{innerMap})
+	outerMap := reg.NativeToValue(map[string]any{
+		"level1": middleList,
+	})
+	
+	// Convert to map[string]any
+	native, err := outerMap.ConvertToNative(reflect.TypeFor[map[string]any]())
+	if err != nil {
+		t.Fatalf("ConvertToNative failed: %v", err)
+	}
+	
+	// Verify that json.Marshal works correctly
+	jsonBytes, err := json.Marshal(native)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	
+	expectedJSON := `{"level1":[{"items":["value1","value2"]}]}`
+	actualJSON := string(jsonBytes)
+	if actualJSON != expectedJSON {
+		t.Errorf("JSON mismatch:\nGot:      %s\nExpected: %s", actualJSON, expectedJSON)
+	}
+}
+
